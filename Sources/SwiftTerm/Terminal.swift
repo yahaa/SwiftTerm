@@ -762,7 +762,7 @@ open class Terminal {
     
     public func resetNormalBuffer() {
         normalBuffer = Buffer(cols: cols, rows: rows, tabStopWidth: tabStopWidth, scrollback: options.scrollback)
-        normalBuffer.scroll = scroll(isWrapped:)
+        normalBuffer.scroll = { [weak self] wrapped in self?.scroll(isWrapped: wrapped) }
 
         normalBuffer.fillViewportRows()
         normalBuffer.setupTabStops(tabStopWidth: tabStopWidth)
@@ -5864,6 +5864,31 @@ open class Terminal {
         return result
     }
     
+    /// Returns the last `maxBytes` of the UTF-8 buffer export without translating older rows.
+    /// Equivalent to `getBufferAsData(kind: kind).suffix(maxBytes)` for a positive limit,
+    /// including right trimming, row newlines, and suffixes beginning inside a UTF-8 scalar.
+    /// Non-positive limits return empty data. At most the needed rows are translated;
+    /// temporary storage is bounded by the suffix plus one complete row.
+    public func getBufferTailAsData (maxBytes: Int, kind: BufferKind = .active) -> Data
+    {
+        guard maxBytes > 0 else { return Data() }
+        let b = bufferFromKind(kind: kind)
+        var remaining = maxBytes
+        var chunks: [Data] = []
+        for row in (0..<b.lines.count).reversed() {
+            var encoded = Data(b.lines[row].translateToString(trimRight: true).utf8)
+            encoded.append(10)
+            let count = min(remaining, encoded.count)
+            chunks.append(Data(encoded.suffix(count)))
+            remaining -= count
+            if remaining == 0 { break }
+        }
+        var result = Data()
+        result.reserveCapacity(maxBytes - remaining)
+        for chunk in chunks.reversed() { result.append(chunk) }
+        return result
+    }
+
     /// Returns the text between the specified range
     ///
     public func getText (start: Position, end: Position) -> String
